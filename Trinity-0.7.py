@@ -102,6 +102,7 @@ class Trinity:
         self.limit = 4.85
         
     def parse_fen(self, fen):
+        self.b = [0] * 128
         p = fen.split()
         r, f = 7, 0
         for c in p[0]:
@@ -480,6 +481,5 @@ if __name__ == "__main__":
         fen = line.strip()
         if not fen: continue
         if not engine: engine = Trinity(fen)
-        else: engine.parse_fen(fen)
         print(engine.get_move(fen))
         sys.stdout.flush()
