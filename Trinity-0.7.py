@@ -264,10 +264,19 @@ class Trinity:
                 if (f==0 or files[f-1]==0) and (f==7 or files[f+1]==0): score -= 20 * sign  # Isolated
                 # Passed pawn
                 passed = True
-                for rr in range(r+1 if side_p==WP else 0, r if side_p==WP else 8):
+                rank_iter = range(r + 1, 8) if side_p == WP else range(r - 1, -1, -1)
+                for rr in rank_iter:
                     for ff in (f-1,f,f+1):
-                        if 0<=ff<8 and self.b[rr*16+ff]==enemy_p: passed=False; break
-                if passed: score += (10 + r*r) * sign if side_p==WP else -(10 + (7-r)*(7-r)) * sign
+                        if 0<=ff<8 and self.b[rr*16+ff]==enemy_p:
+                            passed = False
+                            break
+                    if not passed:
+                        break
+                if passed:
+                    if side_p == WP:
+                        score += (10 + r*r) * sign
+                    else:
+                        score += (10 + (7-r)*(7-r)) * sign
         return score
         
     def eval_king_safety(self, side):
@@ -322,13 +331,12 @@ class Trinity:
             if pt in (WN,WB): phase += 1
             elif pt==WR: phase += 2
             elif pt==WQ: phase += 4
-            idx = sq if p<=6 else sq^112
             if p<=6:
                 mg += MG_VAL[pt] + PST_MG[p][sq]
                 eg += EG_VAL[pt] + PST_EG[p][sq]
             else:
-                mg -= MG_VAL[pt] + PST_MG[p][sq^112]
-                eg -= EG_VAL[pt] + PST_EG[p][sq^112]
+                mg -= MG_VAL[pt] + PST_MG[p][sq]
+                eg -= EG_VAL[pt] + PST_EG[p][sq]
         # Bishop pair
         wb = bb = 0
         for sq in range(128):
@@ -339,7 +347,7 @@ class Trinity:
         if bb>=2: mg-=30; eg-=45
         # Add advanced terms
         mg += self.eval_pawns() + self.eval_king_safety('w') + self.eval_king_safety('b')
-        mg += self.eval_mobility('w') - self.eval_mobility('b')
+        mg += self.eval_mobility('w') + self.eval_mobility('b')
         phase = min(phase, 24)
         score = (mg*phase + eg*(24-phase)) // 24
         return score if self.side=='w' else -score
