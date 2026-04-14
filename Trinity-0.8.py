@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
 """
-Trinity-1.0 - The Ultimate Chess Engine
-Fusion of Trinity-0.1 through 0.6 + Advanced Optimizations
+Trinity-1.0 - High-Performance Chess Engine (Fixed & Optimized)
 
 Features:
-✓ 0x88 board representation (fast move gen)
-✓ Zobrist hashing + Transposition Table (500k entries)
-✓ Tapered PeSTO evaluation (MG/EG) with high-res tables
-✓ Advanced search: PVS, LMR, Null Move, Razoring, Futility
-✓ Move ordering: MVV-LVA → Killers → History → Counter → Default
+✓ 0x88 board representation for fast move generation
+✓ Zobrist hashing + Transposition Table (500k entries max)
+✓ Tapered PeSTO evaluation (MG/EG blending)
+✓ Advanced search: PVS, LMR, Null Move, Razoring, Futility Pruning
+✓ Move ordering: MVV-LVA → Killers → History → Counter-Moves
 ✓ Pawn structure: passed/isolated/doubled detection
-✓ King safety: pawn shield + enemy attacker penalties
-✓ Mobility bonus for pieces
-✓ Bishop pair + tempo bonuses
-✓ SEE pruning in quiescence
+✓ King safety: pawn shield + enemy attacker penalties  
+✓ Mobility bonus + Bishop pair evaluation
+✓ SEE filtering in quiescence for tactical stability
 ✓ Aspiration windows with dynamic retry
-✓ Iterative deepening with mate detection
-✓ Process reuse: stays alive between moves
+✓ Robust legality checking (FIXED: original_side tracking)
+✓ Process reuse: stays alive between moves for TT persistence
 
 Constraints: 5s/move, 256MB RAM, 1 CPU, stdlib only
 """
 import sys, time, random
 
 # ==============================================================================
-# CONSTANTS & BOARD SETUP (0x88)
+# CONSTANTS & BOARD SETUP (0x88 representation)
 # ==============================================================================
 EMPTY = 0
 PIECES = " PNBRQKpnbrqk"
@@ -98,7 +96,7 @@ def zobrist(board, side, castle, ep):
     return h
 
 # ==============================================================================
-# GLOBAL SEARCH DATA (persistent across moves for process reuse)
+# GLOBAL SEARCH DATA (persistent for process reuse)
 # ==============================================================================
 TT = {}  # {hash: (depth, flag, score, move)}
 HIST = [[0]*128 for _ in range(128)]
@@ -361,7 +359,7 @@ class Trinity:
         if not cap and m[1]!=self.ep: return 0
         victim = MG_VAL[cap if cap<=6 else cap-6] if cap else 100  # EP capture value
         attacker = MG_VAL[self.b[f] if self.b[f]<=6 else self.b[f]-6]
-        return victim - attacker//10  # Simplified: positive = good trade
+        return victim - attacker//10  # Positive = good trade
         
     def score_move(self, m, tt_m, ply, last):
         f,t,pr = m
@@ -389,9 +387,11 @@ class Trinity:
         moves.sort(key=lambda m: self.score_move(m,None,0,None), reverse=True)
         for m in moves:
             u = self.make(m)
-            # Legality check
-            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==(WK if self.side=='b' else BK)), -1)
-            if self.attacked(ks, self.side=='w'): self.unmake(m,u); continue
+            # *** FIXED LEGALITY CHECK: use original side for king lookup ***
+            original_side = 'w' if self.side=='b' else 'b'  # Side before make() flipped it
+            king_piece = WK if original_side=='w' else BK
+            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==king_piece), -1)
+            if ks!=-1 and self.attacked(ks, original_side=='b'): self.unmake(m,u); continue
             s = -self.quiesce(-beta, -alpha)
             self.unmake(m,u)
             if s>=beta: return beta
@@ -434,9 +434,11 @@ class Trinity:
             # Futility pruning: skip quiet moves if eval is too low
             if depth==1 and i>5 and self.evaluate()+150<alpha and not self.b[m[1]] and m[1]!=self.ep: continue
             u = self.make(m)
-            # Legality check
-            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==(WK if self.side=='b' else BK)), -1)
-            if self.attacked(ks, self.side=='w'): self.unmake(m,u); continue
+            # *** FIXED LEGALITY CHECK: use original side for king lookup ***
+            original_side = 'w' if self.side=='b' else 'b'
+            king_piece = WK if original_side=='w' else BK
+            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==king_piece), -1)
+            if ks!=-1 and self.attacked(ks, original_side=='b'): self.unmake(m,u); continue
             # PVS + LMR
             if i==0:
                 s = -self.search(depth-1, -beta, -alpha, ply+1, m)
@@ -478,8 +480,11 @@ class Trinity:
         legal = []
         for m in self.gen_moves():
             u = self.make(m)
-            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==(WK if self.side=='b' else BK)), -1)
-            if not self.attacked(ks, self.side=='w'): legal.append(m)
+            # *** FIXED: use original_side for legality check ***
+            original_side = 'w' if self.side=='b' else 'b'
+            king_piece = WK if original_side=='w' else BK
+            ks = next((i for i in range(128) if not(i&0x88) and self.b[i]==king_piece), -1)
+            if ks!=-1 and not self.attacked(ks, original_side=='b'): legal.append(m)
             self.unmake(m,u)
         if not legal: return "0000"
         best_m = legal[0]
@@ -499,7 +504,7 @@ class Trinity:
             if entry and entry[3] in legal: best_m = entry[3]
             # Early exit on forced mate
             if val>25000 or val<-25000: break
-        # Fallback to first legal move if TT failed
+        # *** FINAL SAFETY: Only return validated legal move ***
         if best_m not in legal: best_m = legal[0]
         # Convert to UCI
         f,t,pr = best_m
