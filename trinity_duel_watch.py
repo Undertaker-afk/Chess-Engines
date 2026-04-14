@@ -130,7 +130,12 @@ def choose_engine(engines, prompt, forbidden=None):
         return idx
 
 
-def render_live(board, game_no, white_name, black_name, result_text, score):
+def append_action(action_log, message):
+    ts = time.strftime("%H:%M:%S")
+    action_log.append(f"[{ts}] {message}")
+
+
+def render_live(board, game_no, white_name, black_name, result_text, score, action_log):
     clear_screen()
     print("LIVE TRINITY DUEL")
     print("=" * 80)
@@ -142,12 +147,18 @@ def render_live(board, game_no, white_name, black_name, result_text, score):
     print("=" * 80)
     print(board)
     print("=" * 80)
+    print("ACTION LOG")
+    print("-" * 80)
+    for line in action_log:
+        print(line)
+    print("-" * 80)
     print("Press Ctrl+C to stop.")
 
 
-def play_one_game(white, black, game_no, score):
+def play_one_game(white, black, game_no, score, action_log):
     board = chess.Board()
     status = "running"
+    append_action(action_log, f"Game {game_no} start: {white.name} (White) vs {black.name} (Black)")
 
     while not board.is_game_over():
         current = white if board.turn else black
@@ -156,21 +167,25 @@ def play_one_game(white, black, game_no, score):
         if uci == "0000":
             status = f"forfeit: {current.name} timeout/empty move"
             result = "0-1" if board.turn else "1-0"
+            append_action(action_log, f"Game {game_no}: {status}")
             break
 
         try:
             board.push_uci(uci)
             status = f"move: {current.name} played {uci}"
+            append_action(action_log, f"Game {game_no}: {current.name} -> {uci}")
         except Exception:
             status = f"forfeit: {current.name} invalid move {uci}"
             result = "0-1" if board.turn else "1-0"
+            append_action(action_log, f"Game {game_no}: {status}")
             break
 
-        render_live(board, game_no, white.name, black.name, status, score)
+        render_live(board, game_no, white.name, black.name, status, score, action_log)
         time.sleep(FRAME_DELAY_SEC)
     else:
         result = board.result()
         status = f"game over: {result}"
+        append_action(action_log, f"Game {game_no} finished: {result}")
 
     if result == "1-0":
         score[white.name] += 1.0
@@ -180,7 +195,7 @@ def play_one_game(white, black, game_no, score):
         score[white.name] += 0.5
         score[black.name] += 0.5
 
-    render_live(board, game_no, white.name, black.name, status, score)
+    render_live(board, game_no, white.name, black.name, status, score, action_log)
     return result, status
 
 
@@ -202,6 +217,8 @@ def main():
     second.start()
 
     score = {first.name: 0.0, second.name: 0.0}
+    action_log = []
+    append_action(action_log, f"Session start: {first.name} vs {second.name}")
 
     print("\nStarting continuous duel. Press Ctrl+C to stop.\n")
     time.sleep(1.0)
@@ -214,7 +231,7 @@ def main():
             else:
                 white, black = second, first
 
-            play_one_game(white, black, game_no, score)
+            play_one_game(white, black, game_no, score, action_log)
             game_no += 1
             time.sleep(0.5)
     except KeyboardInterrupt:
