@@ -7,7 +7,7 @@ import random
 # ==============================================================================
 
 # Global Constants
-EMPTY, PIECES = 0, " P N B R Q K p n b r q k"
+EMPTY, PIECES = 0, " PNBRQKpnbrqk"
 W_PAWN, W_KNIGHT, W_BISHOP, W_ROOK, W_QUEEN, W_KING = 1, 2, 3, 4, 5, 6
 B_PAWN, B_KNIGHT, B_BISHOP, B_ROOK, B_QUEEN, B_KING = 7, 8, 9, 10, 11, 12
 
@@ -475,6 +475,23 @@ class TrinityEngine:
         return best_v
 
     def get_best_move(self):
+        legal_moves = []
+        for m in self.get_moves(False):
+            u = self.make_move(m)
+            ksq = -1
+            is_w = self.side == 'b'
+            for idx in range(128):
+                if not (idx & 0x88) and self.board[idx] == (W_KING if is_w else B_KING):
+                    ksq = idx
+                    break
+            illegal = self.is_attacked(ksq, 'b' if is_w else 'w')
+            self.undo_move(m, u)
+            if not illegal:
+                legal_moves.append(m)
+
+        if not legal_moves:
+            return "0000"
+
         best_m = None
         # Aspiration Windows
         alpha, beta = -100000, 100000
@@ -491,12 +508,15 @@ class TrinityEngine:
             alpha, beta = val - 30, val + 30
             if val > 25000 or val < -25000: break
             
+        if best_m not in legal_moves:
+            best_m = legal_moves[0]
+
         if best_m:
             f, t, pr = best_m
             res = f"{chr(97+(f&7))}{ (f>>4)+1 }{chr(97+(t&7))}{ (t>>4)+1 }"
             if pr: res += PIECES[pr].lower()
             return res
-        return "e2e4"
+        return "0000"
 
 # ==============================================================================
 # MAIN

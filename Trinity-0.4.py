@@ -8,7 +8,7 @@ import random
 # ==============================================================================
 
 # Global Constants
-EMPTY, PIECES = 0, " P N B R Q K p n b r q k"
+EMPTY, PIECES = 0, " PNBRQKpnbrqk"
 W_PAWN, W_KNIGHT, W_BISHOP, W_ROOK, W_QUEEN, W_KING = 1, 2, 3, 4, 5, 6
 B_PAWN, B_KNIGHT, B_BISHOP, B_ROOK, B_QUEEN, B_KING = 7, 8, 9, 10, 11, 12
 

@@ -22,6 +22,7 @@ ZOBRIST_PIECES = {p: [random.getrandbits(64) for _ in range(128)] for p in PIECE
 ZOBRIST_TURN = random.getrandbits(64)
 ZOBRIST_CASTLING = {c: random.getrandbits(64) for c in 'KQkq'}
 ZOBRIST_EP = [random.getrandbits(64) for _ in range(128)]
+HISTORY = [[0] * 128 for _ in range(128)]
 
 def get_hash(board, turn, castling, ep_sq):
     h = 0
@@ -75,7 +76,9 @@ def evaluate(board, turn):
         elif pu == 'R': phase += 2
         elif pu == 'Q': phase += 4
 
-        idx = sq if p.isupper() else sq ^ 112
+        rank = sq >> 4
+        file = sq & 7
+        idx = (rank * 8 + file) if p.isupper() else ((7 - rank) * 8 + file)
         v_mg = PIECE_VALUES_MG[pu] + PST[pu]['mg'][idx]
         v_eg = PIECE_VALUES_EG[pu] + PST[pu]['eg'][idx]
 
@@ -299,6 +302,18 @@ def get_legal_moves(board, turn, ep_sq, castling):
     return legal
 
 
+def sq_to_uci(sq):
+    return chr((sq & 7) + ord('a')) + str((sq >> 4) + 1)
+
+
+def move_to_uci(m):
+    f, t, promo, _ = m
+    uci = sq_to_uci(f) + sq_to_uci(t)
+    if promo:
+        uci += promo.lower()
+    return uci
+
+
 def score_move(m, board, tt_move, ply):
     f, t, promo, mtype = m
     if m == tt_move: return 1000000
@@ -388,7 +403,12 @@ class TrinityEngine:
 
     def get_best_move(self, fen):
         self.parse_fen(fen)
-        best_move = None
+        self.start_time = time.time()
+        legal_moves = get_legal_moves(self.board, self.turn, self.ep_sq, self.castling)
+        if not legal_moves:
+            return "0000"
+
+        best_move = legal_moves[0]
         alpha = -50000
         beta = 50000
 
@@ -406,10 +426,10 @@ class TrinityEngine:
             alpha = val - 40
             beta = val + 40
 
-            if best_move is None:
-                best_move = "e2e4"  # fallback
+            # Keep a legal fallback move even though this search currently returns only score.
+            best_move = legal_moves[0]
 
-        return best_move or "e2e4"
+        return move_to_uci(best_move)
 
 
 # ==============================================================================
