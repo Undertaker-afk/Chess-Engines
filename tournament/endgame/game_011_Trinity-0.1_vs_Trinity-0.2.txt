@@ -1,0 +1,13 @@
+Game 11: Trinity-0.1 (White) vs Trinity-0.2 (Black)
+Result: 0-1
+End reason: forfeit: white timeout/empty move
+Final position at 2026-04-14 21:43:04
+
+r n b q k b n r
+. p . p . p p p
+. . . . p . . .
+p . p . . . . .
+. . . P P . . .
+. . N . . N . .
+P P P . . P P P
+R . B Q K B . R

@@ -1,0 +1,13 @@
+Game 6: Trinity-0.1 (White) vs Trinity-0.3 (Black)
+Result: 1-0
+End reason: forfeit: black timeout/empty move
+Final position at 2026-04-14 21:43:04
+
+. . r q k b . r
+p p p . p p p p
+. . n . . n . .
+. . . p . b . .
+. . . P . B . .
+. . N B P N . .
+P P P . . P P P
+R . . Q K . . R
