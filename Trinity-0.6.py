@@ -328,32 +328,48 @@ def score_move(m, board, tt_move, ply):
 # ==============================================================================
 # SEARCH
 # ==============================================================================
-def quiescence(board, turn, alpha, beta, engine):
+def quiescence(board, turn, ep_sq, castling, alpha, beta, engine):
+    if time.time() - engine.start_time > engine.time_limit:
+        engine.abort = True
+        return evaluate(board, turn)
+
     stand = evaluate(board, turn)
     if stand >= beta: return beta
     if alpha < stand: alpha = stand
 
-    moves = [m for m in get_legal_moves(board, turn, -1, '-') if board[m[1]] != '.' or m[3] == 'ep']
+    moves = [m for m in get_legal_moves(board, turn, ep_sq, castling) if board[m[1]] != '.' or m[3] == 'ep']
     moves.sort(key=lambda m: score_move(m, board, None, 0), reverse=True)
 
     for m in moves:
-        captured, cap_sq, new_ep, new_castling = make_move(board, m, turn, '-', -1)
-        score = -quiescence(board, 'b' if turn == 'w' else 'w', -beta, -alpha, engine)
+        if engine.abort:
+            return alpha
+
+        captured, cap_sq, new_ep, new_castling = make_move(board, m, turn, castling, ep_sq)
+        score = -quiescence(board, 'b' if turn == 'w' else 'w', new_ep, new_castling, -beta, -alpha, engine)
         undo_move(board, m, turn, captured, cap_sq)
+
+        if engine.abort:
+            return alpha
+
         if score >= beta: return beta
         if score > alpha: alpha = score
+
     return alpha
 
 
-def search(board, turn, depth, alpha, beta, ply, engine):
+def search(board, turn, ep_sq, castling, depth, alpha, beta, ply, engine):
+    if time.time() - engine.start_time > engine.time_limit:
+        engine.abort = True
+        return evaluate(board, turn)
+
     if depth <= 0:
-        return quiescence(board, turn, alpha, beta, engine)
+        return quiescence(board, turn, ep_sq, castling, alpha, beta, engine)
 
     # Razoring
     if depth == 1 and evaluate(board, turn) + 250 < alpha:
-        return quiescence(board, turn, alpha, beta, engine)
+        return quiescence(board, turn, ep_sq, castling, alpha, beta, engine)
 
-    moves = get_legal_moves(board, turn, -1, '-')
+    moves = get_legal_moves(board, turn, ep_sq, castling)
     if not moves:
         ksq = next((i for i in range(128) if not (i&0x88) and board[i] == ('K' if turn=='w' else 'k')), -1)
         return -30000 + ply if is_attacked(board, ksq, turn == 'b') else 0
@@ -362,13 +378,19 @@ def search(board, turn, depth, alpha, beta, ply, engine):
 
     best = -100000
     for i, m in enumerate(moves):
+        if engine.abort:
+            return best
+
         # Futility
         if depth == 1 and i > 5 and evaluate(board, turn) + 150 < alpha and board[m[1]] == '.':
             continue
 
-        captured, cap_sq, new_ep, new_castling = make_move(board, m, turn, '-', -1)
-        score = -search(board, 'b' if turn == 'w' else 'w', depth-1, -beta, -alpha, ply+1, engine)
+        captured, cap_sq, new_ep, new_castling = make_move(board, m, turn, castling, ep_sq)
+        score = -search(board, 'b' if turn == 'w' else 'w', new_ep, new_castling, depth-1, -beta, -alpha, ply+1, engine)
         undo_move(board, m, turn, captured, cap_sq)
+
+        if engine.abort:
+            return best
 
         if score > best: best = score
         if score > alpha: alpha = score
@@ -387,6 +409,7 @@ class TrinityEngine:
         self.abort = False
 
     def parse_fen(self, fen):
+        self.board = ['.'] * 128
         parts = fen.split()
         ranks = parts[0].split('/')
         for r in range(8):
@@ -404,30 +427,63 @@ class TrinityEngine:
     def get_best_move(self, fen):
         self.parse_fen(fen)
         self.start_time = time.time()
+        self.abort = False
         legal_moves = get_legal_moves(self.board, self.turn, self.ep_sq, self.castling)
         if not legal_moves:
             return "0000"
 
         best_move = legal_moves[0]
-        alpha = -50000
-        beta = 50000
 
         for depth in range(1, 30):
             if time.time() - self.start_time > self.time_limit:
                 break
-            val = search(self.board, self.turn, depth, alpha, beta, 0, self)
-            if self.abort: break
+            alpha = -50000
+            beta = 50000
+            depth_best = best_move
+            depth_best_score = -100000
 
-            if val <= alpha or val >= beta:
-                alpha = -50000
-                beta = 50000
-                val = search(self.board, self.turn, depth, alpha, beta, 0, self)
+            candidate_moves = sorted(
+                legal_moves,
+                key=lambda m: score_move(m, self.board, None, 0),
+                reverse=True,
+            )
 
-            alpha = val - 40
-            beta = val + 40
+            for m in candidate_moves:
+                if time.time() - self.start_time > self.time_limit:
+                    self.abort = True
+                    break
 
-            # Keep a legal fallback move even though this search currently returns only score.
-            best_move = legal_moves[0]
+                captured, cap_sq, new_ep, new_castling = make_move(self.board, m, self.turn, self.castling, self.ep_sq)
+                score = -search(
+                    self.board,
+                    'b' if self.turn == 'w' else 'w',
+                    new_ep,
+                    new_castling,
+                    depth - 1,
+                    -beta,
+                    -alpha,
+                    1,
+                    self,
+                )
+                undo_move(self.board, m, self.turn, captured, cap_sq)
+
+                if score > depth_best_score:
+                    depth_best_score = score
+                    depth_best = m
+
+                if score > alpha:
+                    alpha = score
+
+                if alpha >= beta:
+                    break
+
+                if self.abort:
+                    break
+
+            if not self.abort:
+                best_move = depth_best
+            else:
+                break
 
         return move_to_uci(best_move)
 
@@ -436,9 +492,11 @@ class TrinityEngine:
 # UCI LOOP
 # ==============================================================================
 if __name__ == "__main__":
+    engine = None
     for line in sys.stdin:
         fen = line.strip()
         if not fen: continue
-        engine = TrinityEngine(fen)
+        if engine is None:
+            engine = TrinityEngine(fen)
         print(engine.get_best_move(fen))
         sys.stdout.flush()
