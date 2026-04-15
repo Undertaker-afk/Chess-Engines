@@ -15,10 +15,14 @@ import queue
 import subprocess
 import threading
 import chess
+import urllib.request
+import json
 
 
 MOVE_TIMEOUT_SEC = 30.0
 FRAME_DELAY_SEC = 0.08
+API_EVAL_DEPTH = 12
+API_THINKING_TIME = 50
 
 
 def clear_screen():
@@ -135,7 +139,52 @@ def append_action(action_log, message):
     action_log.append(f"[{ts}] {message}")
 
 
-def render_live(board, game_no, white_name, black_name, result_text, score, action_log):
+def fetch_api_eval(fen):
+    """Fetch evaluation from chess-api.com asynchronously."""
+    try:
+        payload = json.dumps({
+            "fen": fen,
+            "depth": API_EVAL_DEPTH,
+            "maxThinkingTime": API_THINKING_TIME,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://chess-api.com/v1",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+def format_eval_info(info):
+    """Format API response into a human-readable evaluation line."""
+    if not info:
+        return "Eval: waiting..."
+    eval_val = info.get("eval", 0)
+    win_chance = info.get("winChance", 50)
+    mate = info.get("mate")
+    san = info.get("san", "")
+    depth = info.get("depth", "?")
+
+    if mate is not None:
+        mate_sign = "+" if mate > 0 else ""
+        return f"Mate in {abs(mate)} | {san} | Depth {depth}"
+
+    cp = eval_val
+    sign = "+" if cp > 0 else ""
+    bar_len = 30
+    white_pct = max(0, min(100, win_chance))
+    black_pct = 100 - white_pct
+    white_bars = int(bar_len * white_pct / 100)
+    black_bars = bar_len - white_bars
+    bar = "\u2588" * white_bars + "\u2591" * black_bars
+    return f"Eval: {sign}{cp:.2f} | Win: {white_pct:.1f}%W / {black_pct:.1f}%B | [{bar}] | {san} | Depth {depth}"
+
+
+def render_live(board, game_no, white_name, black_name, result_text, score, action_log, eval_info=None):
     clear_screen()
     print("LIVE TRINITY DUEL")
     print("=" * 80)
@@ -144,6 +193,8 @@ def render_live(board, game_no, white_name, black_name, result_text, score, acti
     print(f"Black: {black_name}")
     print(f"Session score  {score[white_name]} - {score[black_name]}")
     print(f"Status: {result_text}")
+    print(f"Turn: {'White' if board.turn else 'Black'} to move")
+    print(format_eval_info(eval_info))
     print("=" * 80)
     print(board)
     print("=" * 80)
@@ -158,6 +209,7 @@ def render_live(board, game_no, white_name, black_name, result_text, score, acti
 def play_one_game(white, black, game_no, score, action_log):
     board = chess.Board()
     status = "running"
+    eval_info = None
     append_action(action_log, f"Game {game_no} start: {white.name} (White) vs {black.name} (Black)")
 
     while not board.is_game_over():
@@ -180,7 +232,15 @@ def play_one_game(white, black, game_no, score, action_log):
             append_action(action_log, f"Game {game_no}: {status}")
             break
 
-        render_live(board, game_no, white.name, black.name, status, score, action_log)
+        # Launch async API eval for the new position
+        fen = board.fen()
+        def fetch_and_store():
+            nonlocal eval_info
+            eval_info = fetch_api_eval(fen)
+        eval_thread = threading.Thread(target=fetch_and_store, daemon=True)
+        eval_thread.start()
+
+        render_live(board, game_no, white.name, black.name, status, score, action_log, eval_info)
         time.sleep(FRAME_DELAY_SEC)
     else:
         result = board.result()
@@ -195,7 +255,7 @@ def play_one_game(white, black, game_no, score, action_log):
         score[white.name] += 0.5
         score[black.name] += 0.5
 
-    render_live(board, game_no, white.name, black.name, status, score, action_log)
+    render_live(board, game_no, white.name, black.name, status, score, action_log, eval_info)
     return result, status
 
 
